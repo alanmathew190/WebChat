@@ -10,7 +10,7 @@ class CreateChat(APIView):
     permission_classes=[IsAuthenticated]
     
     def post(self,request):
-        participants=request.get.data("participants")
+        participants=request.data.get("participants")
         
         chat = Chat.objects.create()
         chat.participants.set(participants)
