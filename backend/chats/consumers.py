@@ -1,5 +1,11 @@
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer
+from asgiref.sync import sync_to_async
+from django.contrib.auth import get_user_model
+from .models import Chat, Message
+
+User = get_user_model()
+
 
 class ChatConsumer(AsyncWebsocketConsumer):
 
@@ -7,7 +13,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
         self.chat_id = self.scope['url_route']['kwargs']['chat_id']
         self.room_group_name = f'chat_{self.chat_id}'
 
-        print("CONNECTED")
+        self.user = self.scope["user"]  # 👈 REAL USER NOW
+
+        if not self.user:
+            await self.close()
+            return
 
         await self.channel_layer.group_add(
             self.room_group_name,
@@ -17,6 +27,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.accept()
 
     async def disconnect(self, close_code):
+        print("DISCONNECTED")
+
         await self.channel_layer.group_discard(
             self.room_group_name,
             self.channel_name
@@ -24,19 +36,31 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     async def receive(self, text_data):
         data = json.loads(text_data)
-        message = data['message']
+        message_text = data['message']
+
+        message = await self.save_message(message_text)
 
         await self.channel_layer.group_send(
             self.room_group_name,
             {
                 'type': 'chat_message',
-                'message': message
+                'message': message.content,
+                'sender': message.sender.email,
             }
         )
 
     async def chat_message(self, event):
-        message = event['message']
-
         await self.send(text_data=json.dumps({
-            'message': message
+            'message': event['message'],
+            'sender': event['sender'],
         }))
+
+    @sync_to_async
+    def save_message(self, message_text):
+        chat = Chat.objects.get(id=self.chat_id)
+
+        return Message.objects.create(
+            chat=chat,
+            sender=self.user,
+            content=message_text
+        )
